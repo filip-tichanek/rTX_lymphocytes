@@ -1,0 +1,1718 @@
+---
+title: "In depth flow cytometry characterization of the peripheral blood immune cell compartment composition and its association with pro-inflammatory factors in patients with stage 5 chronic kidney disease"
+
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 4
+    toc-location: left
+    number-sections: true
+    number-depth: 4
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+editor: source
+theme: darkly
+highlight-style: github-dark
+fontsize: 12 px
+code-block-bg: "#2D2D31"
+fontcolor: "#C4C4C4"
+monobackgroundcolor: "#3B3B3B"
+bibliography: references.bib
+---
+
+------------------------------------------------------------------------
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(collapse = TRUE)
+```
+
+```{css, echo=FALSE}
+code.sourceCode {
+  font-size: 0.86em;
+  border: 1px solid #ffffff;
+  padding: 20px; 
+}
+
+code{
+    color: #EEE8AA;
+}
+
+.equation {
+  text-align: center;
+  display: block;
+  margin: auto;
+}
+
+body {
+  text-align: justify;
+}
+```
+
+------------------------------------------------------------------------
+
+{{< include README.md >}}
+
+------------------------------------------------------------------------
+
+# Introduction
+
+## Statistical methodology
+
+All analyses were run in R, version 4.1 [@Rcomp].
+
+Initially, we noted that only 3 patients had repeated renal transplantation. Their lymphocyte counts were noticeably different from other patients, so we excluded these re-transplanted patients from all analyses.
+
+First, we performed single-variable Permutational Analyses of Variance (PERMANOVAs) using the 'Vegan' R package [@vegan-2] to identify which factors explain the largest portion of variance in the multivariate lymphocyte composition when considered as single predictors. We then selected those with $R^2 > 2$ and included them in a multivariable PERMANOVA, in a sequential manner, ordered by $R^2$ (the most explanatory factor first). This analysis was conducted primarily with all 'specific' data (the most detailed sub-populations of lymphocytes available), but also with more general data (broader categories of lymphocyte populations), and subsets of specific data of similar types (dendritic cells, B-lymphocytes, T-lymphocytes). As a sensitivity analysis, we repeated the construction of the multivariable PERMANOVA, using a p-value threshold (\< 0.05) in the univariable models for variable selection, in cases where this yielded a different set of predictors than selection based on $R^2$. All PERMANOVAs were run with Euclidean distances after log10-transformation and z-standardization of the lymphocyte counts, using 5000 permutations.
+
+Predictors (clinical characteristics) that showed a statistically significant effect in any of the multivariable PERMANOVAs were then used in a series of generalized linear models, fitted with 'glmmTMB' package [@glmmTMB]. Although variable selection for these PERMANOVAs was primarily based on $R^2$, the same set of covariates would have been selected if PERMANOVA variable selection had been based on p-values \< 0.05. These models predicted the count of a specific lymphocyte sub-population assuming a Poisson distribution, with observation-specific random intercepts to account for overdispersion. The selected predictors were: Smoking, cmv (past Cytomegalovirus infection), receiver_age_30y (receiver age scaled so that a 30-year increase represents a one-unit change), Dialysis, and ascvd (Atherosclerotic Cardiovascular Disease). P-values for each predictor were corrected using the Benjamini-Hochberg correction (FDR) for multiple comparisons [@benjamini1995], accounting for the repeated estimation of the effect of each predictor across 18 lymphocyte sub-populations. The results were visualized using a volcano plot, showing the estimated effect of the predictor on the X axis (as estimated log-fold difference in count when the predictor value increases by 1 unit) and the -log10(P-value) on the Y axis (the higher the value, the stronger the evidence of the effect direction). As a sensitivity analysis, we repeated the same procedure using linear model with log-transformed counts as outcomes.
+
+Further, we also show Spearman's rank correlation between lymphocyte sub-population and the selected patients characteristics, visualized with 'ComplexHeatmap' R package [@ComplexHeatmap-2]. For the visualization, lymphocyte sub-populations were clustered based on similarity in distribution of their abundance using UPGMA.
+
+# Analysis
+
+## Initialization
+
+### Packages
+
+```{r}
+if (TRUE) {rm(list = ls() )}
+if (TRUE) {
+  suppressWarnings(suppressMessages({
+    library(tidyverse)
+    library(stringr)
+    library(stringi)
+    library(ggpubr)
+    library(emmeans)
+    library(gtsummary)
+    library(car)
+    library(RJDBC)
+    library(sjPlot)
+    library(flextable)
+    library(openxlsx)
+    library(mgcv)
+    library(pROC)
+    library(cowplot)
+    library(boot)
+    library(glmnet)
+    library(brms)
+    library(janitor)
+    library(arm)
+    library(corrplot)
+    library(lubridate)
+    library(kableExtra)    
+    library(ggdist)
+    library(bayesplot)
+    library(coxed)
+    library(quantreg)
+    library(ggbeeswarm)    
+    library(vegan)
+    library(circlize)
+    library(ComplexHeatmap)
+    library(glmmTMB)
+    library(ggrepel)
+  }))
+}
+```
+
+### Functions
+
+```{r}
+setwd('~/1_ticf_sec/483_ZAHI_lymphocytes')
+source('483_functions.R')
+```
+
+### Directories
+
+```{r}
+folders <- c("data", 
+             "gitignore",
+             "gitignore/run",
+             "gitignore/figures",
+             "gitignore/outputs",
+             "gitignore/data")
+
+invisible(
+  lapply(folders, function(x) if (!dir.exists(x)) 
+    dir.create(x, recursive = TRUE)
+    )
+  )
+```
+
+### Seed
+
+```{r}
+set.seed(16)
+```
+
+## Data
+
+### Import and wrangling
+
+Import
+
+```{r}
+if (!file.exists("data/data_all.csv")) {
+  data_excel_all <- read.xlsx("gitignore/data/FACS_lymfocyty_filip2.xlsx") %>%
+    dplyr::mutate(
+      id = as.character(1:nrow(.)),
+      group = factor(group)
+    ) %>%
+    dplyr::rename(
+    `non_switched_memory` = `non-switched.memory`) %>% 
+    dplyr::select(
+      -`rodne_cislo`, -`Jmeno`,
+      -`Sekce.klinické.proměnné`,
+      -`sekce.dendritické.buňky`,
+      -`sekce.B-lymfocyty`,
+      -`Sekce.T-lymfocyty`
+    ) %>%
+    dplyr::select(id, everything())
+
+  readr::write_csv(data_excel_all, "data/data_all.csv")
+}
+
+data_excel_all <- readr::read_csv("data/data_all.csv") %>%
+  mutate(group = factor(group))
+
+
+data_avail <- data_excel_all %>% 
+  dplyr::rename(
+    mDC1 = mDC1_absp,
+    mDC2 = mDC2_absp,
+    mDC3 = mDC3_absp,
+    pDC = pDC_absp,
+    `naive B cells` = naiveB_absp,
+    `marginal-zone B cells` = marginal.B,
+    `class non-switched memory cells` = `non_switched_memory`,
+    `class switched memory cells` = switched.memory,
+    plasmablast = Plazmablasty_absp,
+    `transitional B cells` = Transitional_absp,
+    `CD4+ CM cells` = CD.4.CM,
+    `CD4+ EM cells` = CD.4.EM,
+    `CD4+ naive cells` = CD4_naive_absp,
+    `CD4+ TEMRA cells` = CD4_TEMRA_absp,
+    `CD8+ CM cells` = CD8_CM_absp,
+    `CD8+ EM cells` = CD8_EM_absp,
+    `CD8+ naive cells` = CD.8.naive,
+    `CD8+ TEMRA cells` = CD8_TEMRA_absp,
+    mDC1 = mDC1_absp,
+    mDC2 = mDC2_absp,
+    mDC3 = mDC3_absp,
+    pDC = pDC_absp,
+    `naive B cells` = naiveB_absp,
+    `marginal-zone B cells` = marginal.B,
+    `HLA-DR+ cells`= `HLA_DR+_Absp`, 
+     `total mDC` = `mDC_absp`, 
+     `total CD19+ B cells` = `CD.19`, 
+     `total CD3+ cells` = `CD3_absp`, 
+     `total CD4+ cells` = `CD4_absp`, 
+     `total CD8+ cells` = `CD8_absp`,
+     `diabetes` = `Diabetes`,
+    `hepatitis_b` = `hep.B`,
+    `hypertension` = `lecena.hypertenze`,
+    `hyperuricemia` = `lecena.hyperurikemie`,
+    `dyslipidemia` = `lecena.dyslipidemie`,
+    `anti_HLA` = `anti-HLA.preTx.nebo.historicky.ano/ne`,
+    `receiver_age` = `věk.příjemce`,
+    `receiver_female` = `pohlavi.prijemce.(ž=1)`,
+    `dialysis` = `Dialysis`,
+    `re_transplantation` = `retransplantace`) 
+
+skimr::skim(data_avail)
+names(data_avail)
+
+data_excel <- data_excel_all %>% 
+  na.omit()
+
+dim(data_excel)
+```
+
+Clinical data
+
+```{r}
+data_clinical <- data_excel %>% 
+  dplyr::select(
+    id, Diabetes, PRD.GN, Smoking, hep.B, ASCVD, 
+    lecena.hypertenze, lecena.hyperurikemie, lecena.dyslipidemie,
+    `anti-HLA.preTx.nebo.historicky.ano/ne`,
+    `věk.příjemce`, `pohlavi.prijemce.(ž=1)`, 
+    Dialysis, retransplantace, CMV) %>% 
+  dplyr::rename(
+    `diabetes` = `Diabetes`,
+    `hepatitis_b` = `hep.B`,
+    `hypertension` = `lecena.hypertenze`,
+    `hyperuricemia` = `lecena.hyperurikemie`,
+    `dyslipidemia` = `lecena.dyslipidemie`,
+    `anti_HLA` = `anti-HLA.preTx.nebo.historicky.ano/ne`,
+    `receiver_age` = `věk.příjemce`,
+    `receiver_female` = `pohlavi.prijemce.(ž=1)`,
+    `dialysis` = `Dialysis`,
+    `re_transplantation` = `retransplantace`)
+
+summary(data_clinical)
+```
+
+General lymphocytes (wider lymphocytes categories)
+
+```{r}
+data_lymphocytes_general <- data_excel %>% 
+  dplyr::select(
+    id, `HLA_DR+_Absp`, `mDC_absp`, 
+    `CD.19`, `CD3_absp`, `CD4_absp`, `CD8_absp`) %>% 
+    rename(
+     `HLA-DR+ cells`= `HLA_DR+_Absp`, 
+     `total mDC` = `mDC_absp`, 
+     `total CD19+ B cells` = `CD.19`, 
+     `total CD3+ cells` = `CD3_absp`, 
+     `total CD4+ cells` = `CD4_absp`, 
+     `total CD8+ cells` = `CD8_absp`
+    )
+
+summary(data_lymphocytes_general)
+
+
+data_lymphocytes_general_log10 <- data_lymphocytes_general %>% 
+  dplyr::mutate(dplyr::across(
+    .cols = dplyr::where(is.numeric),  
+    .fns = ~ arm::rescale(log10(.x + 0.5)),  
+    .names = "scaled_log10_{.col}" 
+  )) %>% 
+  dplyr::select(-c(`HLA-DR+ cells` : `total CD8+ cells`))
+
+summary(data_lymphocytes_general_log10)
+```
+
+Specific lymphocytes (narrower lymphocytes categories)
+
+```{r}
+data_lymphocytes_specific <- data_excel %>% 
+  dplyr::select(
+    id, 
+    `mDC1_absp`,`mDC2_absp`, `mDC3_absp`,
+    `pDC_absp`,
+    `naiveB_absp`,
+    `marginal.B`, `non_switched_memory`,`switched.memory`,   
+    `Plazmablasty_absp`,`Transitional_absp`, 
+    `CD.4.CM`, `CD.4.EM`, `CD4_naive_absp`, `CD4_TEMRA_absp`,
+    `CD8_CM_absp`, `CD8_EM_absp`, `CD.8.naive`, `CD8_TEMRA_absp`) %>% 
+  dplyr::rename(
+    mDC1 = mDC1_absp,
+    mDC2 = mDC2_absp,
+    mDC3 = mDC3_absp,
+    pDC = pDC_absp,
+    `naive B cells` = naiveB_absp,
+    `marginal-zone B cells` = marginal.B,
+    #`class non-switched memory cells` = non_switched_memory,
+    `class switched memory cells` = switched.memory,
+    plasmablast = Plazmablasty_absp,
+    `transitional B cells` = Transitional_absp,
+    `CD4+ CM cells` = CD.4.CM,
+    `CD4+ EM cells` = CD.4.EM,
+    `CD4+ naive cells` = CD4_naive_absp,
+    `CD4+ TEMRA cells` = CD4_TEMRA_absp,
+    `CD8+ CM cells` = CD8_CM_absp,
+    `CD8+ EM cells` = CD8_EM_absp,
+    `CD8+ naive cells` = CD.8.naive,
+    `CD8+ TEMRA cells` = CD8_TEMRA_absp
+  )
+
+
+summary(data_lymphocytes_specific)
+
+
+data_lymphocytes_specific_log10 <- data_lymphocytes_specific %>% 
+  dplyr::mutate(dplyr::across(
+    .cols = dplyr::where(is.numeric),  
+    .fns = ~ arm::rescale(log10(.x + 0.5)), 
+    .names = "scaled_log10_{.col}" 
+  )) %>% 
+  dplyr::select(-c(`mDC1` : `CD8+ TEMRA cells`))
+
+summary(data_lymphocytes_specific_log10)
+```
+
+# Exploration and analysis
+
+## Number of re-transplantations
+
+There is very small proportion of re-trans plantations. How many? Are these patients different in terms of lymphocyte composition?
+
+```{r}
+table(data_clinical$re_transplantation)
+
+data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_specific, by = 'id') %>% 
+  dplyr::select(-id) %>% 
+  dplyr::mutate(re_transplantation) %>% 
+  gtsummary::tbl_summary(by = 're_transplantation') %>% 
+  add_p() %>% 
+  add_q()
+```
+
+It seems that patients with re-transplantation may have very different lymphocyte composition, but small number of such patients does not allow to infer the effect of re-transplantation. Thus, the 3 patients will be removed for further analysis
+
+### Re-transplantated patients removal
+
+```{r}
+ids <- data_clinical %>% filter(re_transplantation == 1) %>% 
+  dplyr::select(id)
+
+ids <- ids$id
+
+data_clinical <- data_clinical %>% 
+  dplyr::filter(!id %in% ids) %>% 
+  dplyr::select(-re_transplantation)
+```
+
+## Patients vs controls
+
+```{r}
+median_diffs <- data_excel_all %>%
+  dplyr::select(`HLA_DR+_Absp`:`CD8_TEMRA_absp`, group) %>%
+  tidyr::pivot_longer(cols = -group, names_to = "variable", values_to = "value") %>%
+  dplyr::group_by(variable, group) %>%
+  dplyr::summarise(median = mean(value, na.rm = TRUE), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = group, values_from = median) %>%
+  dplyr::mutate(median_diff = .[[3]] / .[[2]]) %>%
+  dplyr::select(variable, median_diff)
+
+# Create the gtsummary table
+tbl <- data_excel_all %>%
+  dplyr::select(`HLA_DR+_Absp`:`CD8_TEMRA_absp`, group) %>%
+  gtsummary::tbl_summary(
+    by = group,
+    statistic = all_continuous() ~ "{mean} ({p25}, {median}, {p75})"
+  ) %>%
+  gtsummary::modify_table_body(
+    ~ dplyr::left_join(.x, median_diffs, by = "variable")
+  ) %>%
+  gtsummary::modify_header(median_diff ~ "**Mean counts ratio**") %>%
+  gtsummary::modify_fmt_fun(
+    median_diff ~ (function(x) gtsummary::style_number(x, digits = 2))
+) %>% 
+  gtsummary::add_p()
+  
+tbl
+```
+
+## PERMANOVA
+
+### General data
+
+#### Prepare data
+
+```{r}
+ids_removed <- 
+
+outcomes_gen <- data_lymphocytes_general_log10 %>% 
+  filter(!id %in% ids) %>% 
+  dplyr::select(-id)
+
+data_predict <- data_clinical %>% 
+  dplyr::select(-id)
+```
+
+#### Run single-predictor analysis
+
+```{r}
+modelac <- 'perm_general'
+
+assign(modelac, run(
+  expr = perm_over(outcome = outcomes_gen,
+                   predictors = data_predict,
+                   nperm = 5000,
+                   seed = 483),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% dplyr::arrange(desc(r2)) %>% kableExtra::kable()
+```
+
+#### Run multivariable analysis - R2 selection
+
+```{r}
+
+## by margin
+modelac <- 'perm_general_multivariable_margin'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes_gen ~ 
+                   Smoking +
+                   ASCVD +
+                   anti_HLA + 
+                   diabetes,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+
+## sequential
+modelac <- 'perm_general_multivariable_sequential'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes_gen ~ 
+                   Smoking +
+                   ASCVD +
+                   anti_HLA + 
+                   diabetes,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+#### Run multivariable analysis - P-val selection
+
+```{r}
+
+## by margin
+modelac <- 'perm_general_multivariable_margin_sensP'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes_gen ~ 
+                   Smoking +
+                   ASCVD,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+
+## sequential
+modelac <- 'perm_general_multivariable_sequential_sensP'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes_gen ~ 
+                   Smoking +
+                   ASCVD,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+### All specific data
+
+#### Prepare
+
+```{r}
+outcomes <- data_lymphocytes_specific_log10 %>% 
+  filter(!id %in% ids) %>% 
+  dplyr::select(-id)
+
+data_predict <- data_clinical %>% 
+  dplyr::select(-id)
+```
+
+#### Run single-predictor analysis
+
+```{r}
+modelac <- 'perm_specific'
+
+assign(modelac, run(
+  expr = perm_over(outcome = outcomes,
+                   predictors = data_predict,
+                   nperm = 5000,
+                   seed = 483),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% dplyr::arrange(desc(r2)) %>% kableExtra::kable()
+```
+
+#### Run multivariable analyses
+
+Note that both selection with R2 \> 2 as well as P-value \< 0.05 selections results in the same multivariable PERMANOVA
+
+```{r}
+
+## by margin
+modelac <- 'perm_specific_multivariable_margin'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   CMV +
+                   ASCVD +
+                   diabetes +
+                   receiver_age,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+## sequential
+modelac <- 'perm_specific_multivariable_sequential'
+set.seed(483)
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   CMV +
+                   ASCVD +
+                   diabetes +
+                   receiver_age,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+### Dendritic cells
+
+#### Prepare data
+
+```{r}
+outcomes <- data_lymphocytes_specific_log10 %>% 
+  filter(!id %in% ids) %>% 
+  dplyr::select(
+    scaled_log10_mDC1:scaled_log10_pDC
+    )
+
+data_predict <- data_clinical %>%
+  dplyr::select(-id)
+```
+
+#### Run single-predictor analysis
+
+```{r}
+modelac <- 'perm_specific_dendritic'
+
+assign(modelac, run(
+  expr = perm_over(outcome = outcomes,
+                   predictors = data_predict,
+                   nperm = 5000,
+                   seed = 483),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% dplyr::arrange(desc(r2)) %>% kableExtra::kable()
+```
+
+#### Run multivariable analyses
+
+```{r}
+
+## by margin
+modelac <- 'perm_specific_dendritic_multivariable_margin'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   ASCVD,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+## sequential
+modelac <- 'perm_specific_dendritic_multivariable_sequential'
+set.seed(483)
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   ASCVD,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+Note that as only Smoking would be selected on the basis of p-value from a multivariable model, resulting in a multivariable model.
+
+### B-lymphocytes
+
+#### Prepare data
+
+```{r}
+outcomes <- data_lymphocytes_specific_log10 %>% 
+  filter(!id %in% ids) %>%
+  dplyr::select(
+   `scaled_log10_naive B cells`:`scaled_log10_transitional B cells`
+    )
+
+data_predict <- data_clinical %>% dplyr::select(-id)
+```
+
+#### Run single-predictor analysis
+
+```{r}
+modelac <- 'perm_specific_lymphB'
+
+assign(modelac, run(
+  expr = perm_over(outcome = outcomes,
+                   predictors = data_predict,
+                   nperm = 5000,
+                   seed = 483),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% dplyr::arrange(desc(r2)) %>% kableExtra::kable()
+```
+
+#### Run multivariable analyses - R2 selection
+
+```{r}
+
+## by margin
+modelac <- 'perm_specific_lymphB_multivariable_margin'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   dialysis +
+                   diabetes +
+                   ASCVD +
+                   hyperuricemia,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+## sequential
+modelac <- 'perm_specific_lymphB_multivariable_sequential'
+set.seed(483)
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   dialysis +
+                   diabetes +
+                   ASCVD +
+                   hyperuricemia,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+#### Run multivariable analyses - P-value selection
+
+```{r}
+
+## by margin
+modelac <- 'perm_specific_lymphB_multivariable_margin_sensP'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   dialysis +
+                   diabetes,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+## sequential
+modelac <- 'perm_specific_lymphB_multivariable_sequential_sensP'
+set.seed(483)
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   Smoking +
+                   dialysis +
+                   diabetes ,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+### T-lymphocytes
+
+#### Prepare data
+
+```{r}
+outcomes <- data_lymphocytes_specific_log10 %>% 
+  filter(!id %in% ids) %>%
+  dplyr::select(
+   `scaled_log10_CD4+ CM cells`:`scaled_log10_CD8+ TEMRA cells`
+    )
+
+data_predict <- data_clinical %>% dplyr::select(-id)
+```
+
+#### Run single-predictor analysis
+
+```{r}
+modelac <- 'perm_specific_lymphT'
+
+assign(modelac, run(
+  expr = perm_over(outcome = outcomes,
+                   predictors = data_predict,
+                   nperm = 5000,
+                   seed = 483),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% dplyr::arrange(desc(r2)) %>% kableExtra::kable()
+```
+
+#### Run multivariable analyses
+
+Note that selection on the basis of P-value would result in the same multivariable PERMANOVA as based on the R2
+
+```{r}
+
+## by margin
+modelac <- 'perm_specific_lymphT_multivariable_margin'
+set.seed(483)
+
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   CMV +
+                   Smoking +
+                   receiver_age +
+                   ASCVD +
+                   diabetes,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'margin'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+
+## sequential
+modelac <- 'perm_specific_lymphT_multivariable_sequential'
+set.seed(483)
+assign(modelac, run(
+  expr = adonis2(outcomes ~ 
+                   CMV +
+                   Smoking +
+                   receiver_age +
+                   ASCVD +
+                   diabetes,
+                 data = data_predict,
+                 permutations = 10000,
+                 method = 'euclidean',
+                 by = 'terms'),
+  path = paste0('gitignore/run/', modelac),
+  reuse = TRUE))
+
+get(modelac) %>% kableExtra::kable()
+```
+
+## Correlation matrix
+
+### General
+
+```{r, fig.height=4, fig.width=5.5}
+#| fig.cap: 'Spearman rho correlation between selected clinical characteristics and counts of borader categories of lymphocyte sub-populations. Dendrogram shows correlated sub-populations, based on UPGMA clustering' 
+
+set.seed(483)
+# Prepare table
+data_matrix <- data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_general, by = 'id') %>% 
+  dplyr::select(-id) %>% 
+  cor(method = 'spearman') %>% 
+  data.frame() %>% 
+  dplyr::filter(
+    row.names(.) %in% colnames(data_lymphocytes_general)[-1]
+    ) %>% 
+  dplyr::select(
+    row.names(perm_specific_multivariable_sequential)[1:5],
+    dialysis
+    ) %>% as.matrix()
+
+colnames(data_matrix)[1] <- 'smoking'
+colnames(data_matrix)[2] <- 'CMV seropositivity'
+colnames(data_matrix)[6] <- 'dialysis treatment'
+colnames(data_matrix)[5] <- 'age'
+colnames(data_matrix)[4] <- 'diabetes mellitus'
+
+# Calculate distance and perform hierarchical clustering
+distance_matrix2 <- dist(t(outcomes_gen))
+hc2 <- hclust(distance_matrix2, method = 'average')
+
+# Color
+col_fun = colorRamp2(c(-0.5, 0, 0.5), c("blue", "white", "red"))
+
+# Heatmap
+
+tr <- Heatmap(data_matrix, 
+        name = "Spearman rho", 
+        cluster_rows = hc2, 
+        show_row_dend = TRUE, 
+        show_column_dend = FALSE,
+        row_names_gp = gpar(fontsize = 11),
+        column_names_side = "top",
+        row_dend_width = unit(3.2, "cm"),
+        row_split = 2,
+        gap = unit(1.5, "mm"),
+        row_title = NULL,
+        column_title = NULL,
+        row_title_rot = 0,
+       # row_title_side = c("right"),
+        row_title_gp = gpar(fontsize = 14),
+       col = col_fun)
+
+print(tr)
+
+pdf("gitignore/figures/heatmap_general.pdf", width = 5.5, height = 4)
+print(tr)
+dev.off()
+
+```
+
+### Specific
+
+```{r, fig.height=6, fig.width=6}
+#| fig.cap: 'Matrix of Spearman correlation coefficients between clinical characteristics and counts of various peripheral blood immune cell subpopulations. The dendrogram illustrates similarities in cell counts, where closely linked tips indicate that the associated lymphocyte subpopulations are interrelated, with higher counts tending to co-occur. Correlations with an entire lymphocyte cluster suggest a specific influence (e.g., CMV infection), while correlations with individual subpopulations across different clusters indicate a more diffuse effect (e.g., smoking). The dendrogram is constructed using the unweighted pair group method with arithmetic mean (UPGMA) clustering. Clusters of subpopulations (as defined by UPGMA) are as follows: (1, grey) plasmablast; (2, red) plasmacytoid dendritic cells (pDC); (3, purple) B cells – including naive B cells, transitional B cells, class-switched memory cells, marginal-zone B cells, and class non-switched memory cells; (4, blue) myeloid dendritic cells (mDC1, mDC2, mDC3); (5, green) naive T cells – CD4+ and CD8+; and (6, orange) memory T cells – including CD4+ and CD8+ TEMRA, effector memory (EM), and central memory (CM) subsets.'
+
+
+# Prepare table
+set.seed(483)
+data_matrix <- data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_specific, by = 'id') %>% 
+  dplyr::select(-id) %>% 
+  cor(method = 'spearman') %>% 
+  data.frame() %>% 
+  dplyr::filter(
+    row.names(.) %in% colnames(data_lymphocytes_specific)[-1]
+    ) %>% 
+  dplyr::select(
+    row.names(perm_specific_multivariable_sequential)[1:5],
+    dialysis
+    ) %>% as.matrix()
+
+
+colnames(data_matrix)[1] <- 'smoking'
+colnames(data_matrix)[2] <- 'CMV seropositivity'
+colnames(data_matrix)[6] <- 'dialysis treatment'
+colnames(data_matrix)[5] <- 'age'
+colnames(data_matrix)[4] <- 'diabetes mellitus'
+
+
+## define outcomes as all speficif features
+outcomes <- data_lymphocytes_specific_log10 %>% 
+  dplyr::select(-id)
+
+# Calculate distance and perform hierarchical clustering
+distance_matrix2 <- dist(t(outcomes))
+hc2 <- hclust(distance_matrix2, method = 'average')
+
+cluster_assignment <- cutree(hc2, k = 6)
+
+  # Assign colors per cluster
+cluster_colors <- c("darkblue", "red4", "darkgreen", "grey40", "orange3", "purple3")
+cluster_colors <- c("darkblue", "red4", "purple3", "grey40", "orange3", "darkgreen")
+
+# Map colors to rows based on cluster
+label_colors <- cluster_colors[cluster_assignment]
+
+tr <- Heatmap(data_matrix, 
+        name = "Spearman rho", 
+        cluster_rows = hc2, 
+        show_row_dend = TRUE, 
+        show_column_dend = FALSE,
+        row_names_gp = gpar(fontsize = 11, col = label_colors),
+        column_names_side = "top",
+        row_dend_width = unit(3.2, "cm"),
+        row_split = 6,
+        gap = unit(1.5, "mm"),
+        row_title = NULL,
+        column_title = NULL,
+        row_title_rot = 0,
+        row_title_side = c("right"),
+        row_title_gp = gpar(fontsize = 14, col = label_colors),
+        col = col_fun)
+
+print(tr)
+
+pdf("gitignore/figures/heatmap_specific.pdf", width = 6, height = 6)
+tr
+dev.off()
+```
+
+## Smokers characterisation
+
+### Clinical predictors
+
+```{r}
+data_clinical %>% 
+  dplyr::mutate(Smoker = if_else(Smoking == 1, 
+                                 'smoker', 
+                                 'non-smoker')) %>%
+  dplyr::select(-id, -Smoking) %>% 
+                  
+  gtsummary::tbl_summary(
+    by = 'Smoker') %>% 
+  add_p() %>% 
+  add_q()
+```
+
+### Lymphocytes general
+
+```{r}
+data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_general, by = 'id') %>% 
+  dplyr::mutate(Smoker = if_else(Smoking == 1, 
+                                 'smoker', 
+                                 'non-smoker')) %>%
+  dplyr::select(-c(id:CMV)) %>%  
+                  
+  gtsummary::tbl_summary(
+    by = 'Smoker') %>%  
+  add_p() %>% 
+  add_q()
+```
+
+### Lymphocytes specific
+
+```{r}
+data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_specific, by = 'id') %>% 
+  dplyr::mutate(Smoker = if_else(Smoking == 1, 
+                                 'smoker', 
+                                 'non-smoker')) %>%
+  
+  dplyr::select(-c(id:CMV)) %>%  
+  
+  gtsummary::tbl_summary(
+    by = 'Smoker') %>%  
+  add_p() %>% 
+  add_q()
+```
+
+## CMV+ characterisation
+
+### Clinical predictors
+
+```{r}
+data_clinical %>% 
+  dplyr::mutate(CMV = if_else(CMV == 1, 
+                                 'CMV+', 
+                                 'CMV-')) %>%
+  dplyr::select(-id) %>% 
+                  
+  gtsummary::tbl_summary(
+    by = 'CMV') %>% 
+  add_p()
+```
+
+### Lymphocytes general
+
+```{r}
+data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_general, by = 'id') %>% 
+  dplyr::mutate(CMV = if_else(CMV == 1, 
+                                 'CMV+', 
+                                 'CMV-')) %>%
+  dplyr::select(-c(id:dialysis)) %>%  
+                  
+  gtsummary::tbl_summary(
+    by = 'CMV') %>%  
+  add_p() %>% 
+  add_q()
+```
+
+### Lymphocytes specific
+
+```{r}
+data_clinical %>% 
+  dplyr::left_join(data_lymphocytes_specific, by = 'id') %>% 
+  dplyr::mutate(CMV = if_else(CMV == 1, 
+                                 'CMV+', 
+                                 'CMV-')) %>%
+  dplyr::select(-c(id:dialysis)) %>%  
+  
+  gtsummary::tbl_summary(
+    by = 'CMV') %>%  
+  add_p() %>% 
+  add_q()
+```
+
+## Univariate analysis
+
+### Data
+
+Lets to log10-transform data but not standardize to express log-FC. Connect to relevant clinical data
+
+```{r}
+data_lymphocytes_specific_counts <- data_lymphocytes_specific %>% 
+  dplyr::mutate(dplyr::across(
+    .cols = dplyr::where(is.numeric),
+    .names = "count_{.col}" 
+  )) %>% 
+  dplyr::select(-c(`mDC1` : `CD8+ TEMRA cells`)) %>% 
+  dplyr::mutate(dplyr::across(
+    dplyr::where(is.numeric), replace_zeros
+    )) %>% 
+  dplyr::mutate(dplyr::across(
+    .cols = dplyr::where(is.numeric),
+    .fns = ~ round(.x * 1e6) 
+  ))
+  
+
+data_glm <-  data_clinical %>% 
+  dplyr::mutate(receiver_age_30y = receiver_age/30) %>% 
+  dplyr::select(
+    id, Smoking, CMV, receiver_age_30y, dialysis, ASCVD
+    ) %>% 
+  dplyr::left_join(data_lymphocytes_specific_counts, by = 'id')
+```
+
+### Running models
+
+#### GLM
+
+```{r}
+
+modelac <- "glm_ranint_poisson"
+namesy <- names(data_lymphocytes_specific_counts)[-1]
+
+assign(modelac, run(
+  expr = glm_iori_poisson(
+    outcomes = namesy,
+    data = data_glm
+  ),
+  path = paste0("gitignore/run/", modelac),
+  reuse = TRUE
+))
+
+glm_ranint_poisson <- glm_ranint_poisson %>%
+  dplyr::mutate(
+    Smoking_P_val_adj = p.adjust(Smoking_P_val, method = "BH"),
+    cmv_P_val_adj = p.adjust(cmv_P_val, method = "BH"),
+    receiver_age_30y_P_val_adj = p.adjust(
+      receiver_age_30y_P_val,
+      method = "BH"
+    ),
+    dialysis_P_val_adj = p.adjust(dialysis_P_val, method = "BH"),
+    ascvd_P_val_adj = p.adjust(
+      ascvd_P_val,
+      method = "BH"
+    )
+  ) %>%
+  dplyr::select(
+    Outcome,
+    Smoking_logFC, Smoking_P_val, Smoking_P_val_adj,
+    cmv_logFC, cmv_P_val, cmv_P_val_adj,
+    receiver_age_30y_logFC, receiver_age_30y_P_val, receiver_age_30y_P_val_adj,
+    dialysis_logFC, dialysis_P_val, dialysis_P_val_adj,
+    ascvd_logFC, ascvd_P_val, ascvd_P_val_adj
+  )
+
+glm_ranint_poisson_CR <- glm_ranint_poisson %>%
+  dplyr::mutate(
+    Smoking_CR = round(exp(Smoking_logFC), 2),
+    cmv_CR = round(exp(cmv_logFC), 2),
+    receiver_age_30y_CR = round(exp(receiver_age_30y_logFC), 2),
+    dialysis_CR = round(exp(dialysis_logFC), 2),
+    ascvd_CR = round(exp(ascvd_logFC), 2)
+  ) %>%
+  dplyr::select(
+    Outcome,
+    Smoking_CR, Smoking_P_val, Smoking_P_val_adj,
+    cmv_CR, cmv_P_val, cmv_P_val_adj,
+    receiver_age_30y_CR,
+    receiver_age_30y_P_val, receiver_age_30y_P_val_adj,
+    dialysis_CR, dialysis_P_val, dialysis_P_val_adj,
+    ascvd_CR, ascvd_P_val, ascvd_P_val_adj
+  )
+
+kableExtra::kbl(glm_ranint_poisson_CR,
+  caption = "Results of generalized linear models showing the association between clinical variables and the composition of peripheral blood immune cell subsets. The `CR` suffix indicates the count ratio, representing the fold expected change in the outcome when the predictor increases by one unit. The `P_val` suffix denotes unadjusted P-values, while the P_val_adj suffix represents P-values coCRected for multiple testing using the Benjamini-Hochberg coCRection, which accounts for the repeated estimation of each predictors effect across 18 outcomes."
+)
+```
+
+#### LM with log-transformed outcomes
+
+```{r}
+
+modelac <- "lm_lognormal_res"
+namesy <- names(data_lymphocytes_specific_counts)[-1]
+
+assign(modelac, run(
+  expr = lm_lognormal(
+    outcomes = namesy,
+    data = data_glm
+  ),
+  path = paste0("gitignore/run/", modelac),
+  reuse = TRUE
+))
+
+lm_lognormal_res <- lm_lognormal_res %>%
+  dplyr::mutate(
+    Smoking_P_val_adj = p.adjust(Smoking_P_val, method = "BH"),
+    cmv_P_val_adj = p.adjust(cmv_P_val, method = "BH"),
+    receiver_age_30y_P_val_adj = p.adjust(
+      receiver_age_30y_P_val,
+      method = "BH"
+    ),
+    dialysis_P_val_adj = p.adjust(dialysis_P_val, method = "BH"),
+    ascvd_P_val_adj = p.adjust(
+      ascvd_P_val,
+      method = "BH"
+    )
+  ) %>%
+  dplyr::select(
+    Outcome,
+    Smoking_logFC, Smoking_P_val, Smoking_P_val_adj,
+    cmv_logFC, cmv_P_val, cmv_P_val_adj,
+    receiver_age_30y_logFC, receiver_age_30y_P_val, receiver_age_30y_P_val_adj,
+    dialysis_logFC, dialysis_P_val, dialysis_P_val_adj,
+    ascvd_logFC, ascvd_P_val, ascvd_P_val_adj
+  ) 
+
+kableExtra::kbl(lm_lognormal_res,
+  caption = "Results of linear models showing the association between clinical variables and the composition of peripheral blood immune cell subsets. The `logFC` suffix indicates effect size, representing the expected change in the log-transformed outcome when the predictor increases by one unit. The `P_val` suffix denotes unadjusted P-values, while the P_val_adj suffix represents P-values corrected for multiple testing using the Benjamini-Hochberg correction, which accounts for the repeated estimation of each predictors effect across 18 outcomes."
+)
+```
+
+### Volcano plot
+
+General setting and getting legend
+
+```{r}
+
+glm_ranint_poisson$Outcome <- c('mDC1', 'mDC2', 'mDC3', 'pDC', 
+  'naive B cells', 'marginal-zone B cells',
+  'class non-switched memory cells', 'class switched memory cells', 
+  'plasmablast', 'transitional B cells', 
+  'CD4+ CM cells', 'CD4+ EM cells', 'CD4+ naive cells', 'CD4+ TEMRA cells', 
+  'CD8+ CM cells', 'CD8+ EM cells', 'CD8+ naive cells', 'CD8+ TEMRA cells')
+
+color_map <- c('Increased' = '#A83226', 
+               'Decreased' = '#2A5CA8', 
+               'FDR>0.05' = 'grey20') 
+
+
+dummy_data <- data.frame(
+  Count = factor(c("Increased", "Decreased", "FDR>0.05"), levels = c("Increased", "Decreased", "FDR>0.05")),
+  x = 1:3,
+  y = 1:3
+)
+
+dummy_plot <- ggplot(dummy_data, aes(x, y, color = Count)) +
+  geom_point() +
+  scale_color_manual(values = color_map) +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14))
+
+get_legend <- function(my_ggplot) {
+  tmp <- ggplot_gtable(ggplot_build(my_ggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+common_legend <- get_legend(dummy_plot)
+```
+
+#### Smoking
+
+```{r, fig.height=5, fig.width=5}
+plotac <- 'fig1'
+predictor <- 'Smoking'
+
+path = paste0('gitignore/figures/',plotac,'_', predictor, '.rds')
+
+if(file.exists(path) == FALSE){
+  assign(plotac, glm_ranint_poisson %>%
+           dplyr::select(Outcome, contains(predictor)) %>%
+           dplyr::mutate(
+             pv_adj = get(paste0(predictor, '_P_val_adj')),
+             pv_raw = get(paste0(predictor, '_P_val')),
+             b_coe = get(paste0(predictor, '_logFC')),
+             ) %>%
+           dplyr::mutate(
+             m_ylab = -log10(pv_raw),
+             m_xlab = b_coe,
+             rescat = if_else(
+               pv_adj >= 0.05,
+               'FDR>0.05',
+               if_else(
+                 b_coe > 0,
+                 'Increased',
+                 'Decreased')),
+             pv_adj = if_else(pv_adj < 1e-6, 1e-6, pv_adj),
+             pv_raw = if_else(pv_raw < 1e-6, 1e-6, pv_raw)) %>%
+
+           mutate(
+             rescat = factor(rescat,
+                             levels = c('Increased', 'Decreased', 'FDR>0.05')),
+             meta_labels = if_else(pv_raw < 0.05, Outcome, '')) %>%
+           mutate(
+             meta_labels = str_remove(meta_labels, 'count_')
+           ) %>% 
+           ggplot(aes(x = b_coe,
+                      y = m_ylab,
+                      color = rescat,
+                      alpha = rescat,
+                      label = meta_labels)) +
+
+           geom_point(size = 2, shape = 16, alpha = 0.6) +
+           geom_vline(xintercept = 0, 
+                      linetype = 'dashed', 
+                      linewidth = 0.2, 
+                      color = 'grey30') +
+
+           geom_text_repel(aes(
+             x = m_xlab,
+             y = m_ylab),
+             show.legend = FALSE,
+             alpha = 1,
+             box.padding = 0.75,
+             size = 3.7,
+             seed = 17) +
+
+           labs(x = 'log(fold count increase)', y = '-log10 (P-value)') +
+           scale_color_manual(values = color_map, name = '') +
+           ggtitle('smoking') +
+           theme(legend.text = element_text(size = 14),
+                 axis.title = element_text(size = 14))+
+           coord_cartesian(ylim = c(0, 6),
+                           xlim = c(-1.8, 1.8)) 
+         )
+
+  saveRDS(get(plotac), file = path)
+  get(plotac)
+
+} else {assign(plotac, readRDS(path))
+    get(plotac)}
+```
+
+#### Cytomegalovirus
+
+```{r, fig.height=5, fig.width=5}
+plotac <- 'fig2'
+predictor <- 'cmv'
+
+path = paste0('gitignore/figures/',plotac,'_', predictor, '.rds')
+
+if(file.exists(path) == FALSE){
+  assign(plotac, glm_ranint_poisson %>%
+           dplyr::select(Outcome, contains(predictor)) %>%
+           dplyr::mutate(
+             pv_adj = get(paste0(predictor, '_P_val_adj')),
+             pv_raw = get(paste0(predictor, '_P_val')),
+             b_coe = get(paste0(predictor, '_logFC')),
+             ) %>%
+           dplyr::mutate(
+             m_ylab = -log10(pv_raw),
+             m_xlab = b_coe,
+             rescat = if_else(
+               pv_adj >= 0.05,
+               'FDR>0.05',
+               if_else(
+                 b_coe > 0,
+                 'Increased',
+                 'Decreased')),
+             pv_adj = if_else(pv_adj < 1e-6, 1e-6, pv_adj),
+             pv_raw = if_else(pv_raw < 1e-6, 1e-6, pv_raw)) %>%
+
+           mutate(
+             rescat = factor(rescat,
+                             levels = c('Increased', 'Decreased', 'FDR>0.05')),
+             meta_labels = if_else(pv_raw < 0.05, Outcome, '')) %>%
+           mutate(
+             meta_labels = str_remove(meta_labels, 'count_')
+           ) %>% 
+           ggplot(aes(x = b_coe,
+                      y = m_ylab,
+                      color = rescat,
+                      alpha = rescat,
+                      label = meta_labels)) +
+
+           geom_point(size = 2, shape = 16, alpha = 0.6) +
+           geom_vline(xintercept = 0, 
+                      linetype = 'dashed', 
+                      linewidth = 0.2, 
+                      color = 'grey30') +
+
+           geom_text_repel(aes(
+             x = m_xlab,
+             y = m_ylab),
+             show.legend = FALSE,
+             alpha = 1,
+             box.padding = 0.6,
+             size = 4.1,
+             seed = 17) +
+
+           labs(x = 'log(fold count increase)', y = '-log10 (P-value)') +
+           scale_color_manual(values = color_map, name = '') +
+           ggtitle('CMV seropositivity') +
+           theme(legend.text = element_text(size = 14),
+                 axis.title = element_text(size = 14))+
+           coord_cartesian(ylim = c(0, 6),
+                           xlim = c(-1.8, 1.8)) 
+         )
+
+  saveRDS(get(plotac), file = path)
+  get(plotac)
+
+} else {assign(plotac, readRDS(path))
+    get(plotac)}
+```
+
+#### Receiver age (effect of 30 years plus)
+
+```{r, fig.height=5, fig.width=5}
+plotac <- "fig3"
+predictor <- "receiver_age_30y"
+
+path <- paste0("gitignore/figures/", plotac, "_", predictor, ".rds")
+
+if (file.exists(path) == FALSE) {
+  assign(plotac, glm_ranint_poisson %>%
+    dplyr::select(Outcome, contains(predictor)) %>%
+    dplyr::mutate(
+      pv_adj = get(paste0(predictor, "_P_val_adj")),
+      pv_raw = get(paste0(predictor, "_P_val")),
+      b_coe = get(paste0(predictor, "_logFC")),
+    ) %>%
+    dplyr::mutate(
+      m_ylab = -log10(pv_raw),
+      m_xlab = b_coe,
+      rescat = if_else(
+        pv_adj >= 0.05,
+        "FDR>0.05",
+        if_else(
+          b_coe > 0,
+          "Increased",
+          "Decreased"
+        )
+      ),
+      m_ylab = if_else(m_ylab > 6, 6, m_ylab)
+    ) %>%
+    mutate(
+      rescat = factor(rescat,
+        levels = c("Increased", "Decreased", "FDR>0.05")
+      ),
+      meta_labels = if_else(pv_raw < 0.05, Outcome, "")
+    ) %>%
+    mutate(
+      meta_labels = str_remove(meta_labels, "count_")
+    ) %>%
+    ggplot(aes(
+      x = b_coe,
+      y = m_ylab,
+      color = rescat,
+      alpha = rescat,
+      label = meta_labels
+    )) +
+    geom_point(size = 2, shape = 16, alpha = 0.6) +
+    geom_vline(
+      xintercept = 0,
+      linetype = "dashed",
+      linewidth = 0.2,
+      color = "grey30"
+    ) +
+    geom_text_repel(
+      aes(
+        x = m_xlab,
+        y = m_ylab
+      ),
+      show.legend = FALSE,
+      alpha = 1,
+      box.padding = 0.7,
+      size = 4.1,
+      seed = 17
+    ) +
+    labs(x = "log(fold count increase)", y = "-log10 (P-value)") +
+    scale_color_manual(values = color_map, name = "") +
+    ggtitle("age (30y)") +
+    theme(
+      legend.text = element_text(size = 14),
+      axis.title = element_text(size = 14)
+    ) +
+    coord_cartesian(
+      ylim = c(0, 6),
+      xlim = c(-1.8, 1.8)
+    ))
+
+  saveRDS(get(plotac), file = path)
+  get(plotac)
+} else {
+  assign(plotac, readRDS(path))
+  get(plotac)
+}
+```
+
+#### Dialysis
+
+```{r, fig.height=5, fig.width=4}
+plotac <- 'fig4'
+predictor <- 'dialysis'
+
+path = paste0('gitignore/figures/',plotac,'_', predictor, '.rds')
+
+if(file.exists(path) == FALSE){
+  assign(plotac, glm_ranint_poisson %>%
+           dplyr::select(Outcome, contains(predictor)) %>%
+           dplyr::mutate(
+             pv_adj = get(paste0(predictor, '_P_val_adj')),
+             pv_raw = get(paste0(predictor, '_P_val')),
+             b_coe = get(paste0(predictor, '_logFC')),
+             ) %>%
+           dplyr::mutate(
+             m_ylab = -log10(pv_raw),
+             m_xlab = b_coe,
+             rescat = if_else(
+               pv_adj >= 0.05,
+               'FDR>0.05',
+               if_else(
+                 b_coe > 0,
+                 'Increased',
+                 'Decreased')),
+             m_ylab = if_else(m_ylab > 6, 6, m_ylab)
+             ) %>%
+           mutate(
+             rescat = factor(rescat,
+                             levels = c('Increased', 'Decreased', 'FDR>0.05')),
+             meta_labels = if_else(pv_raw < 0.05, Outcome, '')) %>%
+           mutate(
+             meta_labels = str_remove(meta_labels, 'count_')
+           ) %>% 
+           ggplot(aes(x = b_coe,
+                      y = m_ylab,
+                      color = rescat,
+                      alpha = rescat,
+                      label = meta_labels)) +
+
+           geom_point(size = 2, shape = 16, alpha = 0.6) +
+           geom_vline(xintercept = 0, 
+                      linetype = 'dashed', 
+                      linewidth = 0.2, 
+                      color = 'grey30') +
+
+             geom_text(aes(
+              x = m_xlab - 0.3,
+              y = m_ylab - 0.15, 
+              label = meta_labels),
+              size = 4.1,
+              hjust = 0.5,  
+              vjust = 1,
+              alpha = 1) +  
+
+           labs(x = 'log(fold count increase)', y = '-log10 (P-value)') +
+           scale_color_manual(values = color_map, name = '') +
+           ggtitle('dialysis treatment') +
+           theme(legend.text = element_text(size = 14),
+                 axis.title = element_text(size = 14))+
+           coord_cartesian(ylim = c(0, 6),
+                           xlim = c(-1.8, 1.8)) 
+         )
+
+  saveRDS(get(plotac), file = path)
+  get(plotac)
+
+} else {assign(plotac, readRDS(path))
+    get(plotac)}
+```
+
+#### ASCVD
+
+```{r, fig.height=5, fig.width=5}
+plotac <- 'fig5'
+predictor <- 'ascvd'
+
+path = paste0('gitignore/figures/',plotac,'_', predictor, '.rds')
+
+if(file.exists(path) == FALSE){
+  assign(plotac, glm_ranint_poisson %>%
+           dplyr::select(Outcome, contains(predictor)) %>%
+           dplyr::mutate(
+             pv_adj = get(paste0(predictor, '_P_val_adj')),
+             pv_raw = get(paste0(predictor, '_P_val')),
+             b_coe = get(paste0(predictor, '_logFC')),
+             ) %>%
+           dplyr::mutate(
+             m_ylab = -log10(pv_raw),
+             m_xlab = b_coe,
+             rescat = if_else(
+               pv_adj >= 0.05,
+               'FDR>0.05',
+               if_else(
+                 b_coe > 0,
+                 'Increased',
+                 'Decreased')),
+             m_ylab = if_else(m_ylab > 6, 6, m_ylab)
+             ) %>%
+           mutate(
+             rescat = factor(rescat,
+                             levels = c('Increased', 'Decreased', 'FDR>0.05')),
+             meta_labels = if_else(pv_raw < 0.05, Outcome, '')) %>%
+           mutate(
+             meta_labels = str_remove(meta_labels, 'count_')
+           ) %>% 
+           ggplot(aes(x = b_coe,
+                      y = m_ylab,
+                      color = rescat,
+                      alpha = rescat,
+                      label = meta_labels)) +
+
+           geom_point(size = 2, shape = 16, alpha = 0.6) +
+           geom_vline(xintercept = 0, 
+                      linetype = 'dashed', 
+                      linewidth = 0.2, 
+                      color = 'grey30') +
+
+           geom_text_repel(aes(
+             x = m_xlab,
+             y = m_ylab),
+             show.legend = FALSE,
+             alpha = 1,
+             box.padding = 0.7,
+             size = 4.1,
+             seed = 17) +
+
+           labs(x = 'log(fold count increase)', y = '-log10 (P-value)') +
+           scale_color_manual(values = color_map, name = '') +
+           ggtitle('ASCVD') +
+           theme(legend.text = element_text(size = 14),
+                 axis.title = element_text(size = 14))+
+           coord_cartesian(ylim = c(0, 6),
+                           xlim = c(-1.8, 1.8)) 
+         )
+
+  saveRDS(get(plotac), file = path)
+  get(plotac)
+
+} else {assign(plotac, readRDS(path))
+    get(plotac)}
+```
+
+#### Volcans matrix
+
+```{r, fig.height=5, fig.width = 11.5}
+#| fig.cap: 'The volcano plot illustrates the effects of clinical characteristics on the counts of various peripheral blood immune cell subpopulations, estimated using a generalized linear model (GLM) with a Poisson distribution. The x-axis represents the effect size of each predictor on the outcomes. For example, an effect size of 0.85 for smoking on switched memory lymphocytes suggests that smoking is associated with a 2.33-fold increase in the count of these cells, as determined by exp(0.85). The y-axis displays the −log⁡10(P-value) for each association, before P-value adjustment. Only associations with unadjusted P-values below 0.05 are labeled.'
+
+plotac <- "fig6"
+predictor <- "volcans_matrix"
+
+path <- paste0("gitignore/figures/", plotac, "_", predictor, ".rds")
+
+if (!file.exists(path)) {
+  # Remove legends from individual plots
+  fig1 <- fig1 + theme(legend.position = "none")
+  fig2 <- fig2 + theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  )
+  fig3 <- fig3 + theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  )
+  fig4 <- fig4 + theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  )
+  fig5 <- fig5 + theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  )
+
+  combined_plot <- ggarrange(
+    fig1,
+    fig2,
+    fig3,
+    fig4,
+    fig5,
+    nrow = 1,
+    ncol = 5,
+    widths = c(1.1, 1, 1, 1, 1)
+  )
+
+  final_plot <- ggarrange(combined_plot,
+    common_legend,
+    ncol = 1,
+    align = "hv",
+    heights = c(10, 1)
+  )
+
+  saveRDS(final_plot, file = path)
+
+  ggsave(
+    filename = paste0("gitignore/figures/", plotac, "_", predictor),
+    device = "pdf",
+    height = 5,
+    width = 11.5
+  )
+
+  final_plot
+} else {
+  assign(plotac, readRDS(path))
+  get(plotac)
+}
+```
+
+# Reproducibility
+
+```{r}
+sessionInfo()
+```
