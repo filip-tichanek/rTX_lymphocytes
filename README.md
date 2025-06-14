@@ -2,11 +2,11 @@
 
 <div style="font-size: larger;">
 Ivan Zahradka<sup>1</sup>, Filip Tichanek<sup>2</sup>, Lucie Majercikova<sup>3</sup>, Jana Douskova<sup>3</sup>, Mathias Streitz<sup>4</sup>, Stephan Schlickeiser<sup>5</sup>, Klara Osickova<sup>1</sup>, Vojtech Petr<sup>1</sup>, Petra Hruba<sup>3</sup>, Ondrej Viklicky<sup>1,3</sup>    
-
-</div>
-
-<p></p>
-
+ 
+ 
+</div>   
+   
+     
 <sup>1</sup> Department of Nephrology, Institute for Clinical and Experimental Medicine, Czech Republic    
 <sup>2</sup> Department of Data Science, Institute for Clinical and Experimental Medicine, Czech Republic    
 <sup>3</sup> Transplantation Laboratory, Institute for Clinical and Experimental Medicine, Prague, Czech Republic  
@@ -15,7 +15,7 @@ Ivan Zahradka<sup>1</sup>, Filip Tichanek<sup>2</sup>, Lucie Majercikova<sup>3</
 
 ---------------------------------------------------------------------------------------------------
 
-This is a statistical report of the study ***In depth flow cytometry characterization of the peripheral blood immune cell compartment composition and its association with pro-inflammatory factors in patients with stage 5 chronic kidney disease*** that is *under review* in the [Frontiers in Immunulogy](https://www.frontiersin.org/journals/immunology)
+This is a statistical report of the study ***In depth flow cytometry characterization of the peripheral blood immune cell compartment composition and its association with pro-inflammatory factors in patients with stage 5 chronic kidney disease*** that *under review* in the [Frontiers in Immunulogy](https://www.frontiersin.org/journals/immunology)
 
 When using this code or data, cite the original publication:
 

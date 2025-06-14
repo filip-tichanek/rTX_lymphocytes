@@ -180,7 +180,8 @@ if (!file.exists("data/data_all.csv")) {
 }
 
 data_excel_all <- readr::read_csv("data/data_all.csv") %>%
-  mutate(group = factor(group))
+  mutate(group = factor(group),
+         id = as.character(id))
 
 
 data_avail <- data_excel_all %>% 
@@ -310,7 +311,7 @@ data_lymphocytes_specific <- data_excel %>%
     pDC = pDC_absp,
     `naive B cells` = naiveB_absp,
     `marginal-zone B cells` = marginal.B,
-    #`class non-switched memory cells` = non_switched_memory,
+    `class non-switched memory cells` = non_switched_memory,
     `class switched memory cells` = switched.memory,
     plasmablast = Plazmablasty_absp,
     `transitional B cells` = Transitional_absp,
@@ -410,8 +411,6 @@ tbl
 #### Prepare data
 
 ```{r}
-ids_removed <- 
-
 outcomes_gen <- data_lymphocytes_general_log10 %>% 
   filter(!id %in% ids) %>% 
   dplyr::select(-id)
@@ -888,7 +887,6 @@ colnames(data_matrix)[4] <- 'diabetes mellitus'
 distance_matrix2 <- dist(t(outcomes_gen))
 hc2 <- hclust(distance_matrix2, method = 'average')
 
-# Color
 col_fun = colorRamp2(c(-0.5, 0, 0.5), c("blue", "white", "red"))
 
 # Heatmap
@@ -906,9 +904,7 @@ tr <- Heatmap(data_matrix,
         row_title = NULL,
         column_title = NULL,
         row_title_rot = 0,
-       # row_title_side = c("right"),
-        row_title_gp = gpar(fontsize = 14),
-       col = col_fun)
+        row_title_gp = gpar(fontsize = 14))
 
 print(tr)
 
